@@ -1,0 +1,4 @@
+name = "Image CSS and JS Formatter"
+description = "Output image as a CSS background image or JS setting"
+core = "7.x"
+dependencies[] = image
