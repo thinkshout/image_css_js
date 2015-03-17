@@ -10,10 +10,18 @@
 function image_css_js_field_formatter_info() {
   return array(
     'image_css_js_js' => array(
-      'label' => t('Image URL as JS Setting'),
-      'field types' => array('image', 'file'),
+      'label' => t('JS Setting'),
+      'field types' => array('image'),
       'settings' => array(
         'setting_name' => 'header_image',
+        'image_style' => ''
+      )
+    ),
+    'image_css_js_css' => array(
+      'label' => t('CSS Background'),
+      'field types' => array('image'),
+      'settings' => array(
+        'class' => 'html',
         'image_style' => ''
       )
     ),
@@ -25,26 +33,39 @@ function image_css_js_field_formatter_info() {
  */
 function image_css_js_field_formatter_settings_form($field, $instance, $view_mode, $form, &$form_state) {
   $element = array();
+  $token_type = token_get_entity_mapping('entity', $instance['entity_type']);
+  $display = $instance['display'][$view_mode];
+  $settings = $display['settings'];
+
+  $image_styles = image_style_options(FALSE, PASS_THROUGH);
+  $image_style_element = array(
+    '#title' => t('Image style'),
+    '#type' => 'select',
+    '#default_value' => $settings['image_style'],
+    '#empty_option' => t('None (original image)'),
+    '#options' => $image_styles,
+  );
 
   switch ($instance['display'][$view_mode]['type']) {
     case 'image_css_js_js':
-      $display = $instance['display'][$view_mode];
-      $settings = $display['settings'];
-
       $element['setting_name'] = array(
         '#type' => 'machine_name',
         '#title' => t('Setting name'),
         '#default_value' => $settings['setting_name'],
       );
 
-      $image_styles = image_style_options(FALSE, PASS_THROUGH);
-      $element['image_style'] = array(
-        '#title' => t('Image style'),
-        '#type' => 'select',
-        '#default_value' => $settings['image_style'],
-        '#empty_option' => t('None (original image)'),
-        '#options' => $image_styles,
+      $element['image_style'] = $image_style_element;
+
+      break;
+
+    case 'image_css_js_css':
+      $element['class'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Class'),
+        '#default_value' => $settings['class'],
+        '#description' => t('The CSS class to apply the background image to. Use [id] for the id of this entity.'),
       );
+      $element['image_style'] = $image_style_element;
 
       break;
   }
@@ -58,25 +79,29 @@ function image_css_js_field_formatter_settings_form($field, $instance, $view_mod
 function image_css_js_field_formatter_settings_summary($field, $instance, $view_mode) {
   $summary = array();
 
+  $display = $instance['display'][$view_mode];
+  $settings = $display['settings'];
+
+  $image_styles = image_style_options(FALSE, PASS_THROUGH);
+  // Unset possible 'No defined styles' option.
+  unset($image_styles['']);
+  // Styles could be lost because of enabled/disabled modules that defines
+  // their styles in code.
+  if (isset($image_styles[$settings['image_style']])) {
+    $summary[] = t('Image style: @style', array('@style' => $image_styles[$settings['image_style']]));
+  }
+  else {
+    $summary[] = t('Original image');
+  }
+
   switch ($instance['display'][$view_mode]['type']) {
+
     case 'image_css_js_js':
-      $display = $instance['display'][$view_mode];
-      $settings = $display['settings'];
-
-      $image_styles = image_style_options(FALSE, PASS_THROUGH);
-      // Unset possible 'No defined styles' option.
-      unset($image_styles['']);
-      // Styles could be lost because of enabled/disabled modules that defines
-      // their styles in code.
-      if (isset($image_styles[$settings['image_style']])) {
-        $summary[] = t('Image style: @style', array('@style' => $image_styles[$settings['image_style']]));
-      }
-      else {
-        $summary[] = t('Original image');
-      }
-
       $summary[] = t('JS Setting: Drupal.settings.image_css_js.@setting_name', array('@setting_name' => $settings['setting_name']));
+      break;
 
+    case 'image_css_js_css':
+      $summary[] = t('Class: @class', array('@class' => $settings['class']));
       break;
   }
 
@@ -92,8 +117,6 @@ function image_css_js_field_formatter_view($entity_type, $entity, $field, $insta
   switch ($display['type']) {
     case 'image_css_js_js':
       foreach ($items as $delta => $item) {
-
-
         if (!empty($display['settings']['image_style'])) {
           $image_url = image_style_url($display['settings']['image_style'], $item['uri']);
         }
@@ -111,6 +134,43 @@ function image_css_js_field_formatter_view($entity_type, $entity, $field, $insta
                   'image_css_js' => array($display['settings']['setting_name'] => $image_url),
                 ),
                 'type' => 'setting'
+              ),
+            ),
+          ),
+        );
+      }
+      break;
+
+    case 'image_css_js_css':
+      $class = $display['settings']['class'];
+      foreach ($items as $delta => $item) {
+        if (!empty($display['settings']['image_style'])) {
+          $image_url = image_style_url($display['settings']['image_style'], $item['uri']);
+        }
+        else {
+          $image_url = file_create_url($item['uri']);
+        }
+
+        // If [id] pseudo-token is included, replace with the entity id.
+        if (strpos($class, '[id]')) {
+          list($id, $vid, $bundle) = entity_extract_ids($entity_type, $entity);
+          $class = str_replace('[id]', $id, $class);
+        }
+
+        // Sanitize the resulting class.
+        $class = drupal_html_class($class);
+
+        // Apply the background image. Additional styling should be in custom CSS.
+        $css = ".$class { background-image: url('$image_url'); }";
+
+        $element[$delta] = array(
+          // No content to the markup, but wrapper divs are still being output.
+          '#markup' => NULL,
+          '#attached' => array(
+            'css' => array(
+              array(
+                'data' => $css,
+                'type' => 'inline'
               ),
             ),
           ),
