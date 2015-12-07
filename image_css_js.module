@@ -14,16 +14,18 @@ function image_css_js_field_formatter_info() {
       'field types' => array('image'),
       'settings' => array(
         'setting_name' => 'header_image',
-        'image_style' => ''
-      )
+        'image_style' => '',
+        'picture_mapping' => '',
+      ),
     ),
     'image_css_js_css' => array(
       'label' => t('CSS Background'),
       'field types' => array('image'),
       'settings' => array(
         'class' => 'html',
-        'image_style' => ''
-      )
+        'picture_mapping' => '',
+        'image_style' => '',
+      ),
     ),
   );
 }
@@ -36,6 +38,20 @@ function image_css_js_field_formatter_settings_form($field, $instance, $view_mod
   $token_type = token_get_entity_mapping('entity', $instance['entity_type']);
   $display = $instance['display'][$view_mode];
   $settings = $display['settings'];
+
+  if (module_exists('picture')) {
+    $picture_mappings = picture_get_mapping_options();
+
+    if ($picture_mappings) {
+      $picture_mapping_element = array(
+          '#title' => t('Picture mapping'),
+          '#type' => 'select',
+          '#default_value' => isset($settings['picture_mapping']) ? $settings['picture_mapping'] : '',
+          '#required' => TRUE,
+          '#options' => $picture_mappings,
+      );
+    }
+  }
 
   $image_styles = image_style_options(FALSE, PASS_THROUGH);
   $image_style_element = array(
@@ -54,6 +70,7 @@ function image_css_js_field_formatter_settings_form($field, $instance, $view_mod
         '#default_value' => $settings['setting_name'],
       );
 
+      $element['picture_mapping'] = isset($picture_mapping_element) ? $picture_mapping_element : NULL;
       $element['image_style'] = $image_style_element;
 
       break;
@@ -65,7 +82,10 @@ function image_css_js_field_formatter_settings_form($field, $instance, $view_mod
         '#default_value' => $settings['class'],
         '#description' => t('The CSS class to apply the background image to. Use [id] for the id of this entity.'),
       );
+
+      $element['picture_mapping'] = isset($picture_mapping_element) ? $picture_mapping_element : NULL;
       $element['image_style'] = $image_style_element;
+
 
       break;
   }
@@ -81,6 +101,14 @@ function image_css_js_field_formatter_settings_summary($field, $instance, $view_
 
   $display = $instance['display'][$view_mode];
   $settings = $display['settings'];
+
+  if (module_exists('picture')) {
+    $picture_mappings = picture_get_mapping_options();
+
+    if (isset($picture_mappings[$settings['picture_mapping']])) {
+      $summary[] = t('Picture mapping: @mapping', array('@mapping' => $picture_mappings[$settings['picture_mapping']]));
+    }
+  }
 
   $image_styles = image_style_options(FALSE, PASS_THROUGH);
   // Unset possible 'No defined styles' option.
@@ -143,25 +171,79 @@ function image_css_js_field_formatter_view($entity_type, $entity, $field, $insta
 
     case 'image_css_js_css':
       $class = $display['settings']['class'];
+      // If [id] pseudo-token is included, replace with the entity id.
+      if (strpos($class, '[id]')) {
+        list($id, $vid, $bundle) = entity_extract_ids($entity_type, $entity);
+        $class = str_replace('[id]', $id, $class);
+      }
+
+      // Sanitize the resulting class.
+      $class = drupal_html_class($class);
+
+      $cass = array();
       foreach ($items as $delta => $item) {
-        if (!empty($display['settings']['image_style'])) {
-          $image_url = image_style_url($display['settings']['image_style'], $item['uri']);
-        }
-        else {
-          $image_url = file_create_url($item['uri']);
+        if (!empty($display['settings']['picture_mapping'])) {
+          if (($image = image_load($item['uri'])) === FALSE) {
+            watchdog('image_css_js', 'Unable to load image: %image', array('%image' => $item['uri']));
+            // If the image couldn't be loaded return nothing.
+            return NULL;
+          }
+          $picture_mapping = picture_mapping_load($display['settings']['picture_mapping']);
+          $breakpoint_styles = picture_get_mapping_breakpoints($picture_mapping, $display['settings']['image_style']);
+          // All breakpoints and multipliers.
+          foreach ($breakpoint_styles as $breakpoint_name => $multipliers) {
+            $breakpoint = breakpoints_breakpoint_load_by_fullkey($breakpoint_name);
+            if ($breakpoint) {
+              $sizes = array();
+              $srcset = array();
+              $derivative_mime_types = array();
+              foreach ($multipliers as $multiplier => $mapping_definition) {
+                switch ($mapping_definition['mapping_type']) {
+                  case 'sizes':
+                    foreach (array_filter($mapping_definition['sizes_image_styles']) as $image_style_name) {
+                      $dimensions = array(
+                          'width' => $image->info['width'],
+                          'height' => $image->info['height'],
+                      );
+                      picture_get_image_dimensions($image_style_name, $dimensions);
+                      // Get mime type.
+                      //$derivative_mime_type = $mime_type;
+                      //$image_style->transformMimeType($derivative_mime_type);
+                      //$derivative_mime_types[] = $derivative_mime_type;
+
+                      // @TODO removed:  . ' ' . $dimensions['width'] . 'w'
+                      $srcset[] = _picture_image_style_url($image_style_name, $item['uri']);
+                      $sizes = array_merge(explode(',', $mapping_definition['sizes']), $sizes);
+                    }
+                    break;
+                  case 'image_style':
+                    // Get mime type (not implemented in Drupal 7.
+                    // $derivative_mime_type = $mime_type;
+                    // $image_style->transformMimeType($derivative_mime_type);
+                    // $derivative_mime_types[] = $derivative_mime_type;
+                    // @TODO removed multiplier.
+                    $srcset[] = _picture_image_style_url($mapping_definition['image_style'], $item['uri']);
+                    break;
+                }
+              }
+
+              // @TODO grabbing the first srcset value only.
+              $css[] = "@media $breakpoint->breakpoint  { .$class { background-image: url('$srcset[0]'); } }";
+            }
+          }
+
         }
 
-        // If [id] pseudo-token is included, replace with the entity id.
-        if (strpos($class, '[id]')) {
-          list($id, $vid, $bundle) = entity_extract_ids($entity_type, $entity);
-          $class = str_replace('[id]', $id, $class);
+        if (!(count($css) > 0)) {
+          if (!empty($display['settings']['image_style'])) {
+            $image_url = image_style_url($display['settings']['image_style'], $item['uri']);
+          } else {
+            $image_url = file_create_url($item['uri']);
+          }
+
+          // Apply the background image. Additional styling should be in custom CSS.
+          $css[] = ".$class { background-image: url('$image_url'); }";
         }
-
-        // Sanitize the resulting class.
-        $class = drupal_html_class($class);
-
-        // Apply the background image. Additional styling should be in custom CSS.
-        $css = ".$class { background-image: url('$image_url'); }";
 
         $element[$delta] = array(
           // No content to the markup, but wrapper divs are still being output.
@@ -169,7 +251,7 @@ function image_css_js_field_formatter_view($entity_type, $entity, $field, $insta
           '#attached' => array(
             'css' => array(
               array(
-                'data' => $css,
+                'data' => implode(' ', $css),
                 'type' => 'inline'
               ),
             ),
