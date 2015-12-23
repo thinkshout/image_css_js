@@ -180,7 +180,6 @@ function image_css_js_field_formatter_view($entity_type, $entity, $field, $insta
       // Sanitize the resulting class.
       $class = drupal_html_class($class);
 
-      $cass = array();
       foreach ($items as $delta => $item) {
         if (!empty($display['settings']['picture_mapping'])) {
           if (($image = image_load($item['uri'])) === FALSE) {
