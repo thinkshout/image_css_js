@@ -244,6 +244,10 @@ function image_css_js_field_formatter_view($entity_type, $entity, $field, $insta
           $css[] = ".$class { background-image: url('$image_url'); }";
         }
 
+        // Reverse the order of the media queries assuming they are in Larges to smallest by default.
+        // Probably not a completely safe assumption.
+        $css = array_reverse($css);
+        
         $element[$delta] = array(
           // No content to the markup, but wrapper divs are still being output.
           '#markup' => NULL,
