@@ -144,6 +144,7 @@ function image_css_js_field_formatter_view($entity_type, $entity, $field, $insta
 
   switch ($display['type']) {
     case 'image_css_js_js':
+
       foreach ($items as $delta => $item) {
         if (!empty($display['settings']['image_style'])) {
           $image_url = image_style_url($display['settings']['image_style'], $item['uri']);
@@ -170,6 +171,9 @@ function image_css_js_field_formatter_view($entity_type, $entity, $field, $insta
       break;
 
     case 'image_css_js_css':
+
+      $css = array();
+
       $class = $display['settings']['class'];
       // If [id] pseudo-token is included, replace with the entity id.
       if (strpos($class, '[id]')) {
@@ -247,7 +251,7 @@ function image_css_js_field_formatter_view($entity_type, $entity, $field, $insta
         // Reverse the order of the media queries assuming they are in Larges to smallest by default.
         // Probably not a completely safe assumption.
         $css = array_reverse($css);
-        
+
         $element[$delta] = array(
           // No content to the markup, but wrapper divs are still being output.
           '#markup' => NULL,
